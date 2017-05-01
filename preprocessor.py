@@ -51,10 +51,10 @@ def detect_vandal_by_fm(row, df):
 
 
 def detect_vandal_ntus(row):
-    vandal = True
+    vandal = 1
     # no vandal detection on meta pages
     if check_metapage(row):
-        vandal = False
+        vandal = -1
         return vandal
     # 15 minutes interval
     ideal_interval_millis = 900000
@@ -70,11 +70,11 @@ def detect_vandal_ntus(row):
         if i > 3:
             break
         if r['pagetitle'] != pagetitle:
-            vandal = False
+            vandal = -1
         rt_list.append(r['revtime'])
     hop_time_diff = sum([j - i for i, j in zip(rt_list[:-1], rt_list[1:])]) / 2
-    if hop_time_diff >= ideal_interval_millis and vandal == True:
-        vandal = False
+    if hop_time_diff >= ideal_interval_millis and vandal == 1:
+        vandal = -1
     return vandal
 
 
@@ -137,4 +137,4 @@ test_data_frame.to_csv('out/test.csv', sep=',', encoding='utf-8', index=False)
 
 end = time.time()
 
-print "Time to preprocess data: ", end - start, " seconds"
+print "Time to preprocess data: ", math.ceil((end - start)/60), " minutes"

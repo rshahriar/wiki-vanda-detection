@@ -1,6 +1,7 @@
 # LOAD THE PREVIOUSLY LEARNED AUTO-ENCODER
 import cPickle
 import pandas as pd
+from sklearn import preprocessing
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import LabelEncoder
 
@@ -21,13 +22,15 @@ wiki_test_dataset['pagetitle'] = encoder.fit_transform(wiki_test_dataset['pageti
 X_test_dataset = wiki_test_dataset.as_matrix(columns=['username', 'revid', 'revtime', 'pagetitle'])
 Y_test_dataset = wiki_test_dataset.as_matrix(columns=['isVandal'])
 
-# Predict from classifier model
-Y_predict_dataset = wiki_trained_model.predict(X_test_dataset)
+# scaling training/testing data
+scaler = preprocessing.MinMaxScaler(feature_range=(-1,1)).fit(X_test_dataset)
+X_test_dataset_transformed = scaler.transform(X_test_dataset)
 
-print Y_test_dataset
+# Predict from classifier model
+Y_predict_dataset = wiki_trained_model.predict(X_test_dataset_transformed)
 
 # code for testing accuracy
-print 'Accuracy store', accuracy_score(Y_test_dataset, Y_predict_dataset)
+print 'Accuracy score: ', accuracy_score(Y_test_dataset, Y_predict_dataset)
 
 # code for decoding
 # wiki_train_dataset['username'] = encoder.inverse_transform(wiki_train_dataset['username'])
