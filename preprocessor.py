@@ -3,6 +3,7 @@ import os
 import time
 
 import pandas as pd
+from sklearn.utils import shuffle
 
 
 def timestamp_to_millis(row, column_name):
@@ -16,39 +17,59 @@ def timestamp_to_millis(row, column_name):
         return -1
 
 
-def check_metapage(row):
-    if row['pagetitle'].startswith('User') \
-            or row['pagetitle'].startswith('User Talk') \
-            or row['pagetitle'].startswith('Talk'):
+def check_metapage(pagetitle):
+    if pagetitle.startswith('user:') \
+            or pagetitle.startswith('user talk:') \
+            or pagetitle.startswith('talk:'):
         return 1
     else:
         return 0
 
 
-def detect_vandal_by_fm(row, df):
+def detect_vandal_by_fm(row):
     vandal = False
     # no vandal detection on meta pages
-    if check_metapage(row):
+    if check_metapage(row['pagetitle'].lower()):
         return vandal
-    # get the username
-    username = row['username']
-    revtime = row['revtime']
-    pagetitle = row['pagetitle']
-    # look up the user records for that page title
-    temp = df.loc[df['username'] == username and df['revtime'] <= revtime]
-    for i in range(temp.shape[0]):
-        # look down in the data frame for the meta page
-        # until edit time stamp is reached
-        search_page_title = temp.ix[i]['pagetitle']
-        if search_page_title.startswith('User') \
-                or search_page_title.startswith('User Talk') \
-                or search_page_title.startswith('Talk'):
-            # if anytime in the past the user edited the metapage,
-            # then the user is not a vandal
-            if search_page_title == pagetitle:
-                vandal = True
-    return vandal
 
+    temp = df.loc[(df['username'] == row['username']) & (df['revtime'] <= row['revtime'])]
+    temp.sort_values(['username', 'revtime'], ascending=True)
+
+    for i, r in temp.iterrows():
+        if check_metapage(r['pagetitle'].lower()):
+            vandal = False
+        else:
+            vandal = True
+        return vandal
+
+
+def detect_vandal_by_crm(row):
+    if check_metapage(row['pagetitle'].lower()):
+        return False, False, False
+
+    temp = df.loc[(df['username'] == row['username']) & (df['revtime'] <= row['revtime'])]
+    temp.sort_values(['username', 'revtime'], ascending=True)
+
+    if len(temp) > 2:
+        last_page = temp.iloc[[temp.shape[0]-2]]
+        second_last_page = temp.iloc[[temp.shape[0]-2]]
+
+        if check_metapage(last_page.iloc[0]['pagetitle'].lower()) \
+            & check_metapage(second_last_page.iloc[0]['pagetitle'].lower())\
+            and last_page.iloc[0]['pagetitle'] == second_last_page.iloc[0]['pagetitle']:
+                return False, False, False
+
+        else:
+            return True, True, True
+
+                # ideal_interval_millis = 180000
+                # time_diff = second_last_page.iloc[0]['revtime'] - last_page.iloc[0]['revtime']
+                # if time_diff < ideal_interval_millis:
+                #     return False, False
+                # else:
+                #     return True, True
+
+    return False, False, False
 
 def detect_vandal_ntus(row):
     vandal = 1
@@ -77,12 +98,13 @@ def detect_vandal_ntus(row):
         vandal = -1
     return vandal
 
-
 # load data from datasets
 start = time.time()
 directory = os.path.join("vews_dataset_v1.1/")
-train_data_frame = pd.DataFrame()
-test_data_frame = pd.DataFrame()
+
+benign_df = pd.DataFrame()
+vandal_df = pd.DataFrame()
+
 for root, dirs, files in os.walk(directory):
     for file_name in files:
         if file_name.endswith(".csv"):
@@ -92,49 +114,60 @@ for root, dirs, files in os.walk(directory):
                                                                  'pagetitle',
                                                                  'isReverted',
                                                                  'revertTime'])
-            # reducing rows of datasets to have a smaller
-            # dataset for fit-predict result - whole
-            # UMDWikiDataset is too lengthy for classifier
+
+            # workaround for smaller datasets
             # data_size = df.shape[0]
             # split_point = int(math.ceil(data_size * 0.01))
             # df = df[:split_point]
 
-            ####
-            # This is temporary - removing all metapages
-            ###
-            # df = df.drop(df[df.pagetitle.str.startswith('User') |
-            #                 df.pagetitle.str.startswith('User talk') |
-            #                 df.pagetitle.str.startswith('Talk')].index)
-
-            # convert True/False to 1/0 respectively
-            df['isReverted'] = df['isReverted'].astype(int)
-
             # df['isMetapage'] = df.apply(lambda row: check_metapage(row), axis=1)
             df['revtime'] = df.apply(lambda row: timestamp_to_millis(row, 'revtime'), axis=1)
             df['revertTime'] = df.apply(lambda row: timestamp_to_millis(row, 'revertTime'), axis=1)
+            if file_name.startswith("benign"):
+                df['vandal'] = 0;
+                benign_df = benign_df.append(df, ignore_index=True)
+            elif file_name.startswith('vandal'):
+                df['vandal'] = 1;
+                vandal_df = vandal_df.append(df, ignore_index=True)
 
-            # split data into training and testing datasets (75%-25%)
-            data_size = df.shape[0]
-            split_point = int(math.ceil(data_size * 0.75))
-            train_df, test_df = df[:split_point], df[split_point:]
-            train_data_frame = train_data_frame.append(train_df, ignore_index=True)
-            test_data_frame = test_data_frame.append(test_df, ignore_index=True)
-
-# debug print
-print "Size of train data set: ", train_data_frame.shape
-print "Size of test data set: ", test_data_frame.shape
-
-# calculate target vector on datasets
-train_data_frame['isVandal'] = train_data_frame.apply(lambda row: detect_vandal_ntus(row), axis=1)
-test_data_frame['isVandal'] = test_data_frame.apply(lambda row: detect_vandal_ntus(row), axis=1)
+# Combine benign and vandal dataframes
+print "Combining benign and vandal datasets"
+total_df = benign_df.append(vandal_df, ignore_index=True)
 
 # sort data by nested sorting on pagetitle and revision time
-train_data_frame.sort_values(['pagetitle', 'revtime'], ascending=True)
+print "Sorting dataset by pagetitle, username, and revtime"
+total_df.sort_values(['pagetitle', 'username', 'revtime'], ascending=True)
+
+# calculate feature vectors
+print "adding feature: ntus..."
+total_df['ntus'] = total_df.apply(lambda row: detect_vandal_ntus(row), axis=1)
+total_df['fm'] = total_df.apply(lambda row: detect_vandal_by_fm(row), axis=1)
+total_df[['crmv', 'crmf', 'crms']] = total_df.apply(lambda row: pd.Series(detect_vandal_by_crm(row)), axis=1)
+
+# Remove all metapages - not required anymore
+print "Removing all metapages"
+total_df = total_df.drop(total_df[total_df.pagetitle.str.lower().startswith('user') |
+                                  total_df.pagetitle.str.lower().startswith('user talk') |
+                                  total_df.pagetitle.str.lower().startswith('talk')].index)
+# to_drop = total_df.applymap(lambda row: check_metapage(row)).all()
+# total_df.drop(to_drop)
+print "Size of total datasets after removing metapages: ", total_df.shape
+
+# convert True/False to 1/0 respectively
+# total_df['isReverted'] = df['isReverted'].astype(int)
+
+# shuffle (to randomize) and split data into training and testing datasets (80%-20%)
+total_df = shuffle(total_df)
+total_data_size = total_df.shape[0]
+split_point = int(math.ceil(total_data_size * 0.80))
+train_df, test_df = df[:split_point], df[split_point:]
+print "Size of train data set: ", train_df.shape
+print "Size of test data set: ", test_df.shape
 
 # write to out folder as csv files
-train_data_frame.to_csv('out/train.csv', sep=',', encoding='utf-8', index=False)
-test_data_frame.to_csv('out/test.csv', sep=',', encoding='utf-8', index=False)
+print "Writing dataframes to files..."
+train_df.to_csv('out/train.csv', sep=',', encoding='utf-8', index=False)
+test_df.to_csv('out/test.csv', sep=',', encoding='utf-8', index=False)
 
 end = time.time()
-
 print "Time to preprocess data: ", math.ceil((end - start)/60), " minutes"
