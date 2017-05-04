@@ -27,80 +27,117 @@ def check_metapage(pagetitle):
 
 
 def detect_vandal_by_fm(row):
-    vandal = False
+    vandal = 0
     # no vandal detection on meta pages
-    if check_metapage(row['pagetitle'].lower()):
-        return vandal
+    # if check_metapage(row['pagetitle'].lower()):
+    #     return vandal
 
     temp = df.loc[(df['username'] == row['username']) & (df['revtime'] <= row['revtime'])]
     temp.sort_values(['username', 'revtime'], ascending=True)
 
     for i, r in temp.iterrows():
         if check_metapage(r['pagetitle'].lower()):
-            vandal = False
+            vandal = 0
         else:
-            vandal = True
+            vandal = 1
         return vandal
+    return vandal
 
 
 def detect_vandal_by_crm(row):
-    if check_metapage(row['pagetitle'].lower()):
-        return False, False, False
-
     temp = df.loc[(df['username'] == row['username']) & (df['revtime'] <= row['revtime'])]
     temp.sort_values(['username', 'revtime'], ascending=True)
 
-    if len(temp) > 2:
-        last_page = temp.iloc[[temp.shape[0]-2]]
-        second_last_page = temp.iloc[[temp.shape[0]-2]]
+    if len(temp) > 1:
+        last_page = temp.iloc[[temp.shape[0]-1]]
 
         if check_metapage(last_page.iloc[0]['pagetitle'].lower()) \
-            & check_metapage(second_last_page.iloc[0]['pagetitle'].lower())\
-            and last_page.iloc[0]['pagetitle'] == second_last_page.iloc[0]['pagetitle']:
-                return False, False, False
+            & check_metapage(row['pagetitle'].lower())\
+            and last_page.iloc[0]['pagetitle'] == row['pagetitle']:
+                three_interval_millis = 180000
+                fifteen_interval_millis = 900000
+                time_diff = row['revtime'] - last_page.iloc[0]['revtime']
 
-        else:
-            return True, True, True
+                if time_diff < three_interval_millis:
+                    return 0, 1, 1
+                elif time_diff >= three_interval_millis & time_diff <= fifteen_interval_millis:
+                    return 1, 0 , 1
+                else:
+                    return 1, 1, 0
+    return 0, 0, 0
 
-                # ideal_interval_millis = 180000
-                # time_diff = second_last_page.iloc[0]['revtime'] - last_page.iloc[0]['revtime']
-                # if time_diff < ideal_interval_millis:
-                #     return False, False
-                # else:
-                #     return True, True
+# def detect_vandal_ntus(row):
+#     vandal = 1
+#     # no vandal detection on meta pages
+#     if check_metapage(row['pagetitle'].lower()):
+#         vandal = -1
+#         return vandal
+#     # 15 minutes interval
+#     ideal_interval_millis = 900000
+#     pagetitle = row['pagetitle']
+#     temp = df.loc[(df['username'] == row['username']) &
+#                   (df['revtime'] <= row['revtime'])]
+#     temp.sort_values(['pagetitle', 'revtime'], ascending=True)
+#     # benign user if -
+#     # edit of a new page at a distance of at most 3 hops
+#     # the gap between two edits are 15 minutes
+#     rt_list = []
+#     for i, r in temp.iterrows():
+#         if i > 3:
+#             break
+#         if r['pagetitle'] != pagetitle:
+#             vandal = -1
+#         rt_list.append(r['revtime'])
+#     hop_time_diff = sum([j - i for i, j in zip(rt_list[:-1], rt_list[1:])]) / 2
+#     if hop_time_diff >= ideal_interval_millis and vandal == 1:
+#         vandal = -1
+#     return vandal
 
-    return False, False, False
 
 def detect_vandal_ntus(row):
-    vandal = 1
-    # no vandal detection on meta pages
-    if check_metapage(row['pagetitle'].lower()):
-        vandal = -1
-        return vandal
-    # 15 minutes interval
+    vandal = 0
     ideal_interval_millis = 900000
     pagetitle = row['pagetitle']
     temp = df.loc[(df['username'] == row['username']) &
                   (df['revtime'] <= row['revtime'])]
-    temp.sort_values(['pagetitle', 'revtime'], ascending=True)
-    # benign user if -
-    # edit of a new page at a distance of at most 3 hops
-    # the gap between two edits are 15 minutes
-    rt_list = []
-    for i, r in temp.iterrows():
-        if i > 3:
-            break
-        if r['pagetitle'] != pagetitle:
-            vandal = -1
-        rt_list.append(r['revtime'])
-    hop_time_diff = sum([j - i for i, j in zip(rt_list[:-1], rt_list[1:])]) / 2
-    if hop_time_diff >= ideal_interval_millis and vandal == 1:
-        vandal = -1
+    temp.sort_values(['username', 'revtime'], ascending=True)
+
+    if len(temp) > 1:
+        last_page = temp.iloc[[temp.shape[0]-1]]
+        hop_time_diff = row['revtime'] - last_page.iloc[0]['revtime']
+
+        if last_page.iloc[0]['pagetitle'] != pagetitle and hop_time_diff >= ideal_interval_millis:
+            vandal = 0
+        else:
+            vandal = 1
+        return vandal
+
+    if len(temp) > 2:
+        second_last_page = temp.iloc[[temp.shape[0]-2]]
+        hop_time_diff = row['revtime'] - second_last_page.iloc[0]['revtime']
+
+        if second_last_page.iloc[0]['pagetitle'] != pagetitle and hop_time_diff >= ideal_interval_millis:
+            vandal = 0
+        else:
+            vandal = 1
+        return vandal
+
+    if len(temp) > 3:
+        third_last_page = temp.iloc[[temp.shape[0]-3]]
+        hop_time_diff = row['revtime'] - third_last_page.iloc[0]['revtime']
+
+        if third_last_page.iloc[0]['pagetitle'] != pagetitle and hop_time_diff >= ideal_interval_millis:
+            vandal = 0
+        else:
+            vandal =1
+        return vandal
+
     return vandal
 
 # load data from datasets
 start = time.time()
 directory = os.path.join("vews_dataset_v1.1/")
+# directory = os.path.join("test_features/")
 
 benign_df = pd.DataFrame()
 vandal_df = pd.DataFrame()
@@ -124,10 +161,10 @@ for root, dirs, files in os.walk(directory):
             df['revtime'] = df.apply(lambda row: timestamp_to_millis(row, 'revtime'), axis=1)
             df['revertTime'] = df.apply(lambda row: timestamp_to_millis(row, 'revertTime'), axis=1)
             if file_name.startswith("benign"):
-                df['vandal'] = 0;
+                df['vandal'] = 0
                 benign_df = benign_df.append(df, ignore_index=True)
             elif file_name.startswith('vandal'):
-                df['vandal'] = 1;
+                df['vandal'] = 1
                 vandal_df = vandal_df.append(df, ignore_index=True)
 
 # Combine benign and vandal dataframes
@@ -170,6 +207,7 @@ print "Size of total data set: ", total_df.shape
 # write to out folder as csv files
 print "Writing dataframes to files..."
 total_df.to_csv('out/wikidata.csv', sep=',', encoding='utf-8', index=False)
+# total_df.to_csv('test_out/wiki_test.csv', sep=',', encoding='utf-8', index=False)
 # train_df.to_csv('out/train.csv', sep=',', encoding='utf-8', index=False)
 # test_df.to_csv('out/test.csv', sep=',', encoding='utf-8', index=False)
 
